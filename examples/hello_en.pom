@@ -1,0 +1,7 @@
+# English Pomidor syntax
+let name = "Render"
+let project = "Pomidor"
+
+print "Hello, " + name
+print "Language: " + project
+print 10 + 5
