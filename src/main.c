@@ -1,11 +1,13 @@
-#include <stdio.h>
+﻿#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
 #include <stdbool.h>
 #include <errno.h>
 
-#define POMIDOR_VERSION "0.3.0"
+#ifndef POMIDOR_VERSION
+#define POMIDOR_VERSION "0.4.0"
+#endif
 #define POMIDOR_REPO "MihailKashintsev/pomidor-c"
 
 static size_t g_allocs = 0;
@@ -730,3 +732,4 @@ int main(int argc, char **argv) {
     }
     return 0;
 }
+

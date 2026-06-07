@@ -347,3 +347,72 @@ pomidor-c/
 ## Лицензия
 
 MIT.
+
+## Автоматический релиз через GitHub Actions
+
+В проект добавлен workflow:
+
+```text
+.github/workflows/release.yml
+```
+
+Он автоматически собирает Pomidor и создаёт GitHub Release, когда ты отправляешь тег версии.
+
+### Как выпустить новую версию на Windows
+
+```powershell
+.\scripts\release.ps1 0.4.0
+```
+
+Скрипт сделает:
+
+1. обновит версию в `src/main.c`;
+2. создаст коммит `Release v0.4.0`;
+3. создаст тег `v0.4.0`;
+4. отправит `main` и тег на GitHub;
+5. GitHub Actions сам соберёт архивы и создаст релиз.
+
+### Как выпустить новую версию на Linux/macOS
+
+```bash
+./scripts/release.sh 0.4.0
+```
+
+### Что соберёт GitHub Actions
+
+После запуска workflow в релизе появятся файлы:
+
+```text
+pomidor-windows-x64.zip
+pomidor-linux-x64.tar.gz
+pomidor-macos-x64.tar.gz
+pomidor-macos-arm64.tar.gz
+install.ps1
+install.sh
+```
+
+### Что делают пользователи
+
+Windows:
+
+```powershell
+irm https://github.com/MihailKashintsev/pomidor-c/releases/latest/download/install.ps1 | iex
+```
+
+Linux/macOS:
+
+```bash
+curl -fsSL https://github.com/MihailKashintsev/pomidor-c/releases/latest/download/install.sh | sh
+```
+
+После этого обновление работает командой:
+
+```bash
+pomidor update
+```
+
+Проверка обновлений:
+
+```bash
+pomidor update-check
+```
