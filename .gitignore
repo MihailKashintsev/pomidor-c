@@ -1,9 +1,11 @@
 build/
+build-*/
+install/
 *.exe
 *.obj
 *.o
-*.dll
-*.so
-*.dylib
-.DS_Store
+*.ilk
+*.pdb
 .vscode/
+.idea/
+.DS_Store

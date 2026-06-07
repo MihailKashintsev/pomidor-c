@@ -1,60 +1,92 @@
-# Pomidor
+# Pomidor C
 
-**Pomidor** — небольшой экспериментальный язык программирования, написанный на **C**.
+**Pomidor** — экспериментальный язык программирования на C с поддержкой русского и английского синтаксиса.
 
-Цель проекта — сделать простой, быстрый и лёгкий язык, который поддерживает команды на русском и английском языке.
+Цель проекта — сделать простой, быстрый и лёгкий язык, который можно постепенно развивать до полноценного ЯП.
 
-Расширение файлов Pomidor:
+## Что нового в этой версии
 
-```text
-.pom
-```
+Добавлено больше функционала:
 
-## Возможности сейчас
-
-На данный момент Pomidor поддерживает:
-
-- `пусть` / `let` — создание переменных
-- `выведи` / `print` — вывод в консоль
+- переменные: `пусть` / `let`
+- изменение переменных: `x = x + 1`
+- вывод: `выведи` / `print`
+- условия: `если` / `if`
+- ветка иначе: `иначе` / `else`
+- циклы: `пока` / `while`
 - числа
 - строки
-- переменные
-- сложение через `+`
+- булевые значения: `истина` / `true`, `ложь` / `false`
+- арифметика: `+`, `-`, `*`, `/`, `%`
+- сравнения: `>`, `>=`, `<`, `<=`, `==`, `!=`
+- логика: `и` / `and`, `или` / `or`, `не` / `not`
+- скобки в выражениях
 - комментарии через `#`
+- встроенные функции:
+  - `длина()` / `len()`
+  - `строка()` / `str()`
+  - `число()` / `num()`
+- проверка памяти через `--mem`
 
 ## Пример на русском
 
 ```pomidor
 пусть имя = "Михаил"
-пусть проект = "Pomidor"
+пусть x = 1
+пусть сумма = 0
 
 выведи "Привет, " + имя
-выведи "Язык: " + проект
-выведи 10 + 5
+выведи "Длина имени: " + строка(длина(имя))
+
+пока x <= 5 {
+    сумма = сумма + x
+    выведи "x = " + строка(x)
+    x = x + 1
+}
+
+если сумма == 15 и истина {
+    выведи "Сумма правильная: " + строка(сумма)
+} иначе {
+    выведи "Ошибка"
+}
 ```
 
 ## Пример на английском
 
 ```pomidor
 let name = "Render"
-let project = "Pomidor"
+let x = 1
+let sum = 0
 
 print "Hello, " + name
-print "Language: " + project
-print 10 + 5
+print "Name length: " + str(len(name))
+
+while x <= 5 {
+    sum = sum + x
+    print "x = " + str(x)
+    x = x + 1
+}
+
+if sum == 15 and true {
+    print "Correct sum: " + str(sum)
+} else {
+    print "Error"
+}
 ```
 
 ## Структура проекта
 
 ```text
-pomidor-c/
+pomidor-c-advanced/
 │
 ├── src/
 │   └── main.c
 │
 ├── examples/
-│   ├── hello_ru.pom
-│   └── hello_en.pom
+│   ├── simple_ru.pom
+│   ├── simple_en.pom
+│   ├── advanced_ru.pom
+│   └── advanced_en.pom
 │
 ├── CMakeLists.txt
 ├── README.md
@@ -70,23 +102,23 @@ pomidor-c/
 - CMake
 - Visual Studio Build Tools или Visual Studio Community с компонентом C++
 
-Команды сборки:
+Команды:
 
 ```bash
 cmake -S . -B build
 cmake --build build --config Release
 ```
 
-Запуск русского примера:
+Запуск:
 
 ```bash
-build\Release\pomidor.exe examples\hello_ru.pom
+build\Release\pomidor.exe examples\advanced_ru.pom
 ```
 
-Запуск английского примера:
+Проверка памяти:
 
 ```bash
-build\Release\pomidor.exe examples\hello_en.pom
+build\Release\pomidor.exe --mem examples\advanced_ru.pom
 ```
 
 ## Сборка на Linux/macOS
@@ -94,23 +126,30 @@ build\Release\pomidor.exe examples\hello_en.pom
 ```bash
 cmake -S . -B build
 cmake --build build
+./build/pomidor examples/advanced_ru.pom
 ```
 
-Запуск:
+Проверка памяти:
 
 ```bash
-./build/pomidor examples/hello_ru.pom
+./build/pomidor --mem examples/advanced_ru.pom
 ```
 
-## Локальная установка
+В конце должно быть примерно так:
 
-После сборки можно установить Pomidor в отдельную папку:
+```text
+[memory] allocations: 92, frees: 92, alive: 0
+```
+
+`alive: 0` означает, что в этом запуске не осталось неудалённой памяти.
+
+## Установка
 
 ```bash
 cmake --install build --prefix install
 ```
 
-После этого исполняемый файл будет находиться здесь:
+После этого исполняемый файл будет здесь:
 
 ```text
 install/bin/pomidor
@@ -122,89 +161,44 @@ install/bin/pomidor
 install/bin/pomidor.exe
 ```
 
-Чтобы запускать язык из любого места, добавьте папку `install/bin` в `PATH`.
+## Как заменить старую версию в репозитории
 
-## Проверка памяти
-
-Так как Pomidor пишется на C, важно следить за памятью.
-
-Главное правило:
-
-```text
-malloc / calloc / realloc / strdup → обязательно free
-```
-
-### AddressSanitizer для GCC/Clang
+1. Скачай архив.
+2. Распакуй его.
+3. Скопируй файлы в свой репозиторий `pomidor-c`.
+4. Выполни:
 
 ```bash
-cmake -S . -B build-asan -DCMAKE_C_FLAGS="-fsanitize=address -g"
-cmake --build build-asan
-./build-asan/pomidor examples/hello_ru.pom
+git add .
+git commit -m "Add conditions loops and expressions"
+git push
 ```
 
-Если где-то будет утечка памяти или выход за границы массива, AddressSanitizer покажет ошибку.
+## Что добавить следующим этапом
 
-### Valgrind на Linux
+Следующие крупные функции:
 
-```bash
-valgrind --leak-check=full ./build/pomidor examples/hello_ru.pom
+- функции пользователя:
+
+```pomidor
+функция привет(имя) {
+    выведи "Привет, " + имя
+}
 ```
 
-## План развития
+- массивы:
 
-В следующих версиях планируется добавить:
+```pomidor
+пусть числа = [1, 2, 3]
+```
 
-- `если` / `if`
-- `иначе` / `else`
-- `пока` / `while`
-- функции
-- массивы
-- модули
-- нормальный лексер
-- парсер
-- AST
-- более удобные сообщения об ошибках
+- импорт файлов:
+
+```pomidor
+импорт "math.pom"
+```
+
+- нормальный AST
+- разделение `main.c` на `lexer.c`, `parser.c`, `interpreter.c`
 - установщик для Windows
-
-## Идея синтаксиса
-
-Русский вариант:
-
-```pomidor
-пусть x = 10
-
-если x > 5 {
-    выведи "x больше 5"
-} иначе {
-    выведи "x меньше или равен 5"
-}
-```
-
-Английский вариант:
-
-```pomidor
-let x = 10
-
-if x > 5 {
-    print "x is greater than 5"
-} else {
-    print "x is less than or equal to 5"
-}
-```
-
-## Зачем нужен Pomidor
-
-Pomidor создаётся как простой учебный язык программирования, который можно постепенно развивать до полноценного языка.
-
-Основные цели:
-
-- понятный синтаксис
-- поддержка русского и английского ввода
-- высокая скорость
-- маленький размер
-- простая установка
-- возможность изучать устройство языков программирования изнутри
-
-## Лицензия
-
-Проект распространяется под лицензией MIT.
+- расширение VS Code с подсветкой `.pom`

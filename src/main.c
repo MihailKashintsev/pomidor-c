@@ -1,386 +1,587 @@
-#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
+#include <stdbool.h>
+
+static size_t g_allocs = 0;
+static size_t g_frees = 0;
+
+static void *pm_malloc(size_t size) {
+    void *ptr = malloc(size ? size : 1);
+    if (!ptr) { fprintf(stderr, "Pomidor: out of memory\n"); exit(1); }
+    g_allocs++;
+    return ptr;
+}
+
+static void *pm_realloc(void *old, size_t size) {
+    if (!old) g_allocs++;
+    void *ptr = realloc(old, size ? size : 1);
+    if (!ptr) { fprintf(stderr, "Pomidor: out of memory\n"); exit(1); }
+    return ptr;
+}
+
+static void pm_free(void *ptr) {
+    if (ptr) { g_frees++; free(ptr); }
+}
+
+static char *pm_strdup_len(const char *s, size_t len) {
+    char *out = (char *)pm_malloc(len + 1);
+    memcpy(out, s, len);
+    out[len] = '\0';
+    return out;
+}
+
+static char *pm_strdup(const char *s) { return pm_strdup_len(s, strlen(s)); }
+
+static bool is_ident_start(unsigned char c) {
+    return c == '_' || c >= 128 || isalpha(c);
+}
+
+static bool is_ident_part(unsigned char c) {
+    return c == '_' || c >= 128 || isalnum(c);
+}
 
 typedef enum {
-    VALUE_NUMBER,
-    VALUE_STRING
-} ValueType;
+    TOK_EOF, TOK_NEWLINE,
+    TOK_NUMBER, TOK_STRING, TOK_IDENT,
+    TOK_LET, TOK_PRINT, TOK_IF, TOK_ELSE, TOK_WHILE,
+    TOK_TRUE, TOK_FALSE,
+    TOK_LPAREN, TOK_RPAREN, TOK_LBRACE, TOK_RBRACE,
+    TOK_COMMA,
+    TOK_PLUS, TOK_MINUS, TOK_STAR, TOK_SLASH, TOK_PERCENT,
+    TOK_ASSIGN, TOK_EQ, TOK_NEQ, TOK_GT, TOK_GTE, TOK_LT, TOK_LTE,
+    TOK_AND, TOK_OR, TOK_NOT
+} TokenType;
+
+typedef struct {
+    TokenType type;
+    char *text;
+    double number;
+    int line;
+    int col;
+} Token;
+
+typedef struct {
+    Token *items;
+    int count;
+    int capacity;
+} TokenList;
+
+static void tokens_push(TokenList *list, Token t) {
+    if (list->count >= list->capacity) {
+        list->capacity = list->capacity ? list->capacity * 2 : 128;
+        list->items = (Token *)pm_realloc(list->items, sizeof(Token) * (size_t)list->capacity);
+    }
+    list->items[list->count++] = t;
+}
+
+static bool streq(const char *a, const char *b) { return strcmp(a, b) == 0; }
+
+static TokenType keyword_type(const char *s) {
+    if (streq(s, "let") || streq(s, "пусть")) return TOK_LET;
+    if (streq(s, "print") || streq(s, "выведи")) return TOK_PRINT;
+    if (streq(s, "if") || streq(s, "если")) return TOK_IF;
+    if (streq(s, "else") || streq(s, "иначе")) return TOK_ELSE;
+    if (streq(s, "while") || streq(s, "пока")) return TOK_WHILE;
+    if (streq(s, "true") || streq(s, "истина")) return TOK_TRUE;
+    if (streq(s, "false") || streq(s, "ложь")) return TOK_FALSE;
+    if (streq(s, "and") || streq(s, "и")) return TOK_AND;
+    if (streq(s, "or") || streq(s, "или")) return TOK_OR;
+    if (streq(s, "not") || streq(s, "не")) return TOK_NOT;
+    return TOK_IDENT;
+}
+
+static TokenList lex_source(const char *src) {
+    TokenList list = {0};
+    int i = 0, line = 1, col = 1;
+    while (src[i]) {
+        char c = src[i];
+        if (c == ' ' || c == '\t' || c == '\r') { i++; col++; continue; }
+        if (c == '\n' || c == ';') {
+            tokens_push(&list, (Token){TOK_NEWLINE, NULL, 0, line, col});
+            i++; line++; col = 1; continue;
+        }
+        if (c == '#') {
+            while (src[i] && src[i] != '\n') { i++; col++; }
+            continue;
+        }
+        if (isdigit((unsigned char)c)) {
+            int start = i, start_col = col;
+            while (isdigit((unsigned char)src[i])) { i++; col++; }
+            if (src[i] == '.') {
+                i++; col++;
+                while (isdigit((unsigned char)src[i])) { i++; col++; }
+            }
+            char *text = pm_strdup_len(src + start, (size_t)(i - start));
+            tokens_push(&list, (Token){TOK_NUMBER, text, strtod(text, NULL), line, start_col});
+            continue;
+        }
+        if (c == '"') {
+            int start_col = col;
+            i++; col++;
+            char *buf = NULL;
+            int len = 0, cap = 0;
+            while (src[i] && src[i] != '"') {
+                char ch = src[i++]; col++;
+                if (ch == '\\') {
+                    char e = src[i++]; col++;
+                    if (e == 'n') ch = '\n';
+                    else if (e == 't') ch = '\t';
+                    else if (e == '"') ch = '"';
+                    else if (e == '\\') ch = '\\';
+                    else ch = e;
+                }
+                if (len + 1 >= cap) { cap = cap ? cap * 2 : 32; buf = (char *)pm_realloc(buf, (size_t)cap); }
+                buf[len++] = ch;
+            }
+            if (src[i] != '"') { fprintf(stderr, "Line %d:%d: string is not closed\n", line, start_col); exit(1); }
+            i++; col++;
+            if (!buf) { buf = (char *)pm_malloc(1); }
+            buf[len] = '\0';
+            tokens_push(&list, (Token){TOK_STRING, buf, 0, line, start_col});
+            continue;
+        }
+        if (is_ident_start((unsigned char)c)) {
+            int start = i, start_col = col;
+            while (is_ident_part((unsigned char)src[i])) { i++; col++; }
+            char *text = pm_strdup_len(src + start, (size_t)(i - start));
+            tokens_push(&list, (Token){keyword_type(text), text, 0, line, start_col});
+            continue;
+        }
+        int start_col = col;
+        if (c == '(') { tokens_push(&list, (Token){TOK_LPAREN, NULL, 0, line, col}); i++; col++; continue; }
+        if (c == ')') { tokens_push(&list, (Token){TOK_RPAREN, NULL, 0, line, col}); i++; col++; continue; }
+        if (c == '{') { tokens_push(&list, (Token){TOK_LBRACE, NULL, 0, line, col}); i++; col++; continue; }
+        if (c == '}') { tokens_push(&list, (Token){TOK_RBRACE, NULL, 0, line, col}); i++; col++; continue; }
+        if (c == ',') { tokens_push(&list, (Token){TOK_COMMA, NULL, 0, line, col}); i++; col++; continue; }
+        if (c == '+') { tokens_push(&list, (Token){TOK_PLUS, NULL, 0, line, col}); i++; col++; continue; }
+        if (c == '-') { tokens_push(&list, (Token){TOK_MINUS, NULL, 0, line, col}); i++; col++; continue; }
+        if (c == '*') { tokens_push(&list, (Token){TOK_STAR, NULL, 0, line, col}); i++; col++; continue; }
+        if (c == '/') { tokens_push(&list, (Token){TOK_SLASH, NULL, 0, line, col}); i++; col++; continue; }
+        if (c == '%') { tokens_push(&list, (Token){TOK_PERCENT, NULL, 0, line, col}); i++; col++; continue; }
+        if (c == '=' && src[i+1] == '=') { tokens_push(&list, (Token){TOK_EQ, NULL, 0, line, col}); i += 2; col += 2; continue; }
+        if (c == '!' && src[i+1] == '=') { tokens_push(&list, (Token){TOK_NEQ, NULL, 0, line, col}); i += 2; col += 2; continue; }
+        if (c == '>' && src[i+1] == '=') { tokens_push(&list, (Token){TOK_GTE, NULL, 0, line, col}); i += 2; col += 2; continue; }
+        if (c == '<' && src[i+1] == '=') { tokens_push(&list, (Token){TOK_LTE, NULL, 0, line, col}); i += 2; col += 2; continue; }
+        if (c == '=') { tokens_push(&list, (Token){TOK_ASSIGN, NULL, 0, line, col}); i++; col++; continue; }
+        if (c == '>') { tokens_push(&list, (Token){TOK_GT, NULL, 0, line, col}); i++; col++; continue; }
+        if (c == '<') { tokens_push(&list, (Token){TOK_LT, NULL, 0, line, col}); i++; col++; continue; }
+        if (c == '!') { tokens_push(&list, (Token){TOK_NOT, NULL, 0, line, col}); i++; col++; continue; }
+        fprintf(stderr, "Line %d:%d: unknown character '%c'\n", line, start_col, c);
+        exit(1);
+    }
+    tokens_push(&list, (Token){TOK_EOF, NULL, 0, line, col});
+    return list;
+}
+
+static void tokens_free(TokenList *list) {
+    for (int i = 0; i < list->count; i++) pm_free(list->items[i].text);
+    pm_free(list->items);
+}
+
+typedef enum { VAL_NIL, VAL_NUMBER, VAL_STRING, VAL_BOOL } ValueType;
 
 typedef struct {
     ValueType type;
     double number;
     char *string;
+    bool boolean;
 } Value;
 
-typedef struct {
-    char *name;
-    Value value;
-} Variable;
+static Value val_nil(void) { return (Value){VAL_NIL, 0, NULL, false}; }
+static Value val_num(double n) { return (Value){VAL_NUMBER, n, NULL, false}; }
+static Value val_bool(bool b) { return (Value){VAL_BOOL, 0, NULL, b}; }
+static Value val_str_own(char *s) { return (Value){VAL_STRING, 0, s, false}; }
+static Value val_str(const char *s) { return val_str_own(pm_strdup(s)); }
+static Value val_copy(Value v) {
+    if (v.type == VAL_STRING) return val_str(v.string ? v.string : "");
+    return v;
+}
+static void val_free(Value v) { if (v.type == VAL_STRING) pm_free(v.string); }
+static bool val_truthy(Value v) {
+    if (v.type == VAL_BOOL) return v.boolean;
+    if (v.type == VAL_NUMBER) return v.number != 0;
+    if (v.type == VAL_STRING) return v.string && v.string[0] != 0;
+    return false;
+}
+static char *val_to_string(Value v) {
+    char buf[128];
+    if (v.type == VAL_STRING) return pm_strdup(v.string ? v.string : "");
+    if (v.type == VAL_BOOL) return pm_strdup(v.boolean ? "истина" : "ложь");
+    if (v.type == VAL_NIL) return pm_strdup("ничего");
+    snprintf(buf, sizeof(buf), "%g", v.number);
+    return pm_strdup(buf);
+}
+static void val_print(Value v) {
+    if (v.type == VAL_STRING) printf("%s", v.string ? v.string : "");
+    else if (v.type == VAL_BOOL) printf("%s", v.boolean ? "истина" : "ложь");
+    else if (v.type == VAL_NIL) printf("ничего");
+    else printf("%g", v.number);
+}
 
-typedef struct {
-    Variable *items;
-    size_t count;
-    size_t capacity;
-} Environment;
+typedef struct { char *name; Value value; } Var;
+typedef struct { Var *items; int count; int capacity; } Env;
 
-static char *pom_strdup(const char *src) {
-    size_t len = strlen(src);
-    char *copy = (char *)malloc(len + 1);
-    if (!copy) {
-        fprintf(stderr, "Pomidor: out of memory\n");
+static int env_find(Env *env, const char *name) {
+    for (int i = 0; i < env->count; i++) if (streq(env->items[i].name, name)) return i;
+    return -1;
+}
+static void env_set(Env *env, const char *name, Value value) {
+    int idx = env_find(env, name);
+    if (idx >= 0) {
+        val_free(env->items[idx].value);
+        env->items[idx].value = val_copy(value);
+        return;
+    }
+    if (env->count >= env->capacity) {
+        env->capacity = env->capacity ? env->capacity * 2 : 32;
+        env->items = (Var *)pm_realloc(env->items, sizeof(Var) * (size_t)env->capacity);
+    }
+    env->items[env->count].name = pm_strdup(name);
+    env->items[env->count].value = val_copy(value);
+    env->count++;
+}
+static Value env_get(Env *env, const char *name, Token t) {
+    int idx = env_find(env, name);
+    if (idx < 0) {
+        fprintf(stderr, "Line %d:%d: variable '%s' not found\n", t.line, t.col, name);
         exit(1);
     }
-    memcpy(copy, src, len + 1);
-    return copy;
+    return val_copy(env->items[idx].value);
+}
+static void env_free(Env *env) {
+    for (int i = 0; i < env->count; i++) { pm_free(env->items[i].name); val_free(env->items[i].value); }
+    pm_free(env->items);
 }
 
-static void value_free(Value *value) {
-    if (value->type == VALUE_STRING) {
-        free(value->string);
-        value->string = NULL;
-    }
-}
+typedef struct {
+    Token *tokens;
+    int pos;
+    int end;
+    Env *env;
+} Parser;
 
-static Value value_number(double number) {
-    Value value;
-    value.type = VALUE_NUMBER;
-    value.number = number;
-    value.string = NULL;
-    return value;
-}
+static Token peek(Parser *p) { return p->tokens[p->pos]; }
+static Token prev(Parser *p) { return p->tokens[p->pos - 1]; }
+static bool at_end(Parser *p) { return p->pos >= p->end || peek(p).type == TOK_EOF; }
+static bool check(Parser *p, TokenType t) { return !at_end(p) && peek(p).type == t; }
+static bool match(Parser *p, TokenType t) { if (check(p, t)) { p->pos++; return true; } return false; }
+static void skip_newlines(Parser *p) { while (check(p, TOK_NEWLINE)) p->pos++; }
+static void error_at(Token t, const char *msg) { fprintf(stderr, "Line %d:%d: %s\n", t.line, t.col, msg); exit(1); }
+static Token consume(Parser *p, TokenType t, const char *msg) { if (check(p, t)) return p->tokens[p->pos++]; error_at(peek(p), msg); return peek(p); }
 
-static Value value_string(const char *text) {
-    Value value;
-    value.type = VALUE_STRING;
-    value.number = 0;
-    value.string = pom_strdup(text);
-    return value;
-}
+static Value parse_expr(Parser *p);
+static void execute_range(Token *tokens, int start, int end, Env *env);
 
-static Value value_clone(const Value *source) {
-    if (source->type == VALUE_STRING) {
-        return value_string(source->string);
-    }
-    return value_number(source->number);
+static int find_next_lbrace(Parser *p) {
+    for (int i = p->pos; i < p->end; i++) if (p->tokens[i].type == TOK_LBRACE) return i;
+    error_at(peek(p), "expected '{'");
+    return -1;
 }
-
-static void env_init(Environment *env) {
-    env->items = NULL;
-    env->count = 0;
-    env->capacity = 0;
-}
-
-static void env_free(Environment *env) {
-    for (size_t i = 0; i < env->count; i++) {
-        free(env->items[i].name);
-        value_free(&env->items[i].value);
-    }
-    free(env->items);
-    env->items = NULL;
-    env->count = 0;
-    env->capacity = 0;
-}
-
-static Variable *env_find(Environment *env, const char *name) {
-    for (size_t i = 0; i < env->count; i++) {
-        if (strcmp(env->items[i].name, name) == 0) {
-            return &env->items[i];
+static int find_matching_rbrace(Token *tokens, int lbrace, int end) {
+    int depth = 0;
+    for (int i = lbrace; i < end; i++) {
+        if (tokens[i].type == TOK_LBRACE) depth++;
+        else if (tokens[i].type == TOK_RBRACE) {
+            depth--;
+            if (depth == 0) return i;
         }
     }
-    return NULL;
+    error_at(tokens[lbrace], "block is not closed with '}'");
+    return -1;
 }
 
-static void env_set(Environment *env, const char *name, Value value) {
-    Variable *existing = env_find(env, name);
-    if (existing) {
-        value_free(&existing->value);
-        existing->value = value;
+static double as_number(Value v, Token op) {
+    if (v.type != VAL_NUMBER) error_at(op, "number expected");
+    return v.number;
+}
+static bool values_equal(Value a, Value b) {
+    if (a.type != b.type) return false;
+    if (a.type == VAL_NUMBER) return a.number == b.number;
+    if (a.type == VAL_BOOL) return a.boolean == b.boolean;
+    if (a.type == VAL_STRING) return strcmp(a.string ? a.string : "", b.string ? b.string : "") == 0;
+    return true;
+}
+static Value op_add(Value a, Value b) {
+    if (a.type == VAL_STRING || b.type == VAL_STRING) {
+        char *sa = val_to_string(a), *sb = val_to_string(b);
+        size_t la = strlen(sa), lb = strlen(sb);
+        char *out = (char *)pm_malloc(la + lb + 1);
+        memcpy(out, sa, la); memcpy(out + la, sb, lb + 1);
+        pm_free(sa); pm_free(sb);
+        return val_str_own(out);
+    }
+    return val_num(as_number(a, (Token){0}) + as_number(b, (Token){0}));
+}
+
+static Value parse_primary(Parser *p) {
+    if (match(p, TOK_NUMBER)) return val_num(prev(p).number);
+    if (match(p, TOK_STRING)) return val_str(prev(p).text);
+    if (match(p, TOK_TRUE)) return val_bool(true);
+    if (match(p, TOK_FALSE)) return val_bool(false);
+    if (match(p, TOK_IDENT)) {
+        Token name = prev(p);
+        if (match(p, TOK_LPAREN)) {
+            Value arg = val_nil();
+            bool has_arg = false;
+            if (!check(p, TOK_RPAREN)) { arg = parse_expr(p); has_arg = true; }
+            consume(p, TOK_RPAREN, "expected ')' after function call");
+            Value result = val_nil();
+            if (streq(name.text, "len") || streq(name.text, "длина")) {
+                if (!has_arg) error_at(name, "len/длина needs one argument");
+                char *s = val_to_string(arg);
+                result = val_num((double)strlen(s));
+                pm_free(s);
+            } else if (streq(name.text, "str") || streq(name.text, "строка")) {
+                if (!has_arg) error_at(name, "str/строка needs one argument");
+                result = val_str_own(val_to_string(arg));
+            } else if (streq(name.text, "num") || streq(name.text, "число")) {
+                if (!has_arg) error_at(name, "num/число needs one argument");
+                char *s = val_to_string(arg);
+                result = val_num(strtod(s, NULL));
+                pm_free(s);
+            } else {
+                error_at(name, "unknown builtin function");
+            }
+            val_free(arg);
+            return result;
+        }
+        return env_get(p->env, name.text, name);
+    }
+    if (match(p, TOK_LPAREN)) {
+        Value v = parse_expr(p);
+        consume(p, TOK_RPAREN, "expected ')' after expression");
+        return v;
+    }
+    error_at(peek(p), "expression expected");
+    return val_nil();
+}
+
+static Value parse_unary(Parser *p) {
+    if (match(p, TOK_MINUS)) {
+        Token op = prev(p);
+        Value right = parse_unary(p);
+        double n = -as_number(right, op);
+        val_free(right);
+        return val_num(n);
+    }
+    if (match(p, TOK_NOT)) {
+        Value right = parse_unary(p);
+        bool b = !val_truthy(right);
+        val_free(right);
+        return val_bool(b);
+    }
+    return parse_primary(p);
+}
+
+static Value parse_factor(Parser *p) {
+    Value left = parse_unary(p);
+    while (match(p, TOK_STAR) || match(p, TOK_SLASH) || match(p, TOK_PERCENT)) {
+        Token op = prev(p);
+        Value right = parse_unary(p);
+        double a = as_number(left, op), b = as_number(right, op);
+        val_free(left); val_free(right);
+        if (op.type == TOK_STAR) left = val_num(a * b);
+        else if (op.type == TOK_SLASH) left = val_num(a / b);
+        else left = val_num((double)((long long)a % (long long)b));
+    }
+    return left;
+}
+
+static Value parse_term(Parser *p) {
+    Value left = parse_factor(p);
+    while (match(p, TOK_PLUS) || match(p, TOK_MINUS)) {
+        Token op = prev(p);
+        Value right = parse_factor(p);
+        if (op.type == TOK_PLUS) {
+            Value res = op_add(left, right);
+            val_free(left); val_free(right);
+            left = res;
+        } else {
+            double n = as_number(left, op) - as_number(right, op);
+            val_free(left); val_free(right);
+            left = val_num(n);
+        }
+    }
+    return left;
+}
+
+static Value parse_compare(Parser *p) {
+    Value left = parse_term(p);
+    while (match(p, TOK_GT) || match(p, TOK_GTE) || match(p, TOK_LT) || match(p, TOK_LTE)) {
+        Token op = prev(p);
+        Value right = parse_term(p);
+        double a = as_number(left, op), b = as_number(right, op);
+        val_free(left); val_free(right);
+        if (op.type == TOK_GT) left = val_bool(a > b);
+        else if (op.type == TOK_GTE) left = val_bool(a >= b);
+        else if (op.type == TOK_LT) left = val_bool(a < b);
+        else left = val_bool(a <= b);
+    }
+    return left;
+}
+
+static Value parse_equality(Parser *p) {
+    Value left = parse_compare(p);
+    while (match(p, TOK_EQ) || match(p, TOK_NEQ)) {
+        Token op = prev(p);
+        Value right = parse_compare(p);
+        bool eq = values_equal(left, right);
+        val_free(left); val_free(right);
+        left = val_bool(op.type == TOK_EQ ? eq : !eq);
+    }
+    return left;
+}
+
+static Value parse_and(Parser *p) {
+    Value left = parse_equality(p);
+    while (match(p, TOK_AND)) {
+        Value right = parse_equality(p);
+        bool b = val_truthy(left) && val_truthy(right);
+        val_free(left); val_free(right);
+        left = val_bool(b);
+    }
+    return left;
+}
+
+static Value parse_expr(Parser *p) {
+    Value left = parse_and(p);
+    while (match(p, TOK_OR)) {
+        Value right = parse_and(p);
+        bool b = val_truthy(left) || val_truthy(right);
+        val_free(left); val_free(right);
+        left = val_bool(b);
+    }
+    return left;
+}
+
+static Value eval_expression_range(Token *tokens, int start, int end, Env *env) {
+    Parser p = {tokens, start, end, env};
+    skip_newlines(&p);
+    Value v = parse_expr(&p);
+    return v;
+}
+
+static void skip_to_line_end(Parser *p) {
+    while (!at_end(p) && !check(p, TOK_NEWLINE) && !check(p, TOK_RBRACE)) p->pos++;
+    while (check(p, TOK_NEWLINE)) p->pos++;
+}
+
+static void parse_statement(Parser *p) {
+    skip_newlines(p);
+    if (at_end(p) || check(p, TOK_RBRACE)) return;
+
+    if (match(p, TOK_LET)) {
+        Token name = consume(p, TOK_IDENT, "expected variable name after let/пусть");
+        consume(p, TOK_ASSIGN, "expected '=' after variable name");
+        Value v = parse_expr(p);
+        env_set(p->env, name.text, v);
+        val_free(v);
+        skip_to_line_end(p);
         return;
     }
 
-    if (env->count == env->capacity) {
-        size_t new_capacity = env->capacity == 0 ? 8 : env->capacity * 2;
-        Variable *new_items = (Variable *)realloc(env->items, new_capacity * sizeof(Variable));
-        if (!new_items) {
-            value_free(&value);
-            fprintf(stderr, "Pomidor: out of memory\n");
-            exit(1);
-        }
-        env->items = new_items;
-        env->capacity = new_capacity;
+    if (check(p, TOK_IDENT) && p->pos + 1 < p->end && p->tokens[p->pos + 1].type == TOK_ASSIGN) {
+        Token name = p->tokens[p->pos++];
+        p->pos++;
+        Value v = parse_expr(p);
+        env_set(p->env, name.text, v);
+        val_free(v);
+        skip_to_line_end(p);
+        return;
     }
 
-    env->items[env->count].name = pom_strdup(name);
-    env->items[env->count].value = value;
-    env->count++;
+    if (match(p, TOK_PRINT)) {
+        Value v = parse_expr(p);
+        val_print(v);
+        printf("\n");
+        val_free(v);
+        skip_to_line_end(p);
+        return;
+    }
+
+    if (match(p, TOK_IF)) {
+        int cond_start = p->pos;
+        int lb = find_next_lbrace(p);
+        int rb = find_matching_rbrace(p->tokens, lb, p->end);
+        Value cond = eval_expression_range(p->tokens, cond_start, lb, p->env);
+        bool ok = val_truthy(cond);
+        val_free(cond);
+        int after = rb + 1;
+        while (after < p->end && p->tokens[after].type == TOK_NEWLINE) after++;
+        int else_lb = -1, else_rb = -1;
+        if (after < p->end && p->tokens[after].type == TOK_ELSE) {
+            Parser tmp = *p; tmp.pos = after + 1;
+            else_lb = find_next_lbrace(&tmp);
+            else_rb = find_matching_rbrace(p->tokens, else_lb, p->end);
+        }
+        if (ok) execute_range(p->tokens, lb + 1, rb, p->env);
+        else if (else_lb >= 0) execute_range(p->tokens, else_lb + 1, else_rb, p->env);
+        p->pos = else_rb >= 0 ? else_rb + 1 : rb + 1;
+        skip_newlines(p);
+        return;
+    }
+
+    if (match(p, TOK_WHILE)) {
+        int cond_start = p->pos;
+        int lb = find_next_lbrace(p);
+        int rb = find_matching_rbrace(p->tokens, lb, p->end);
+        int guard = 0;
+        for (;;) {
+            Value cond = eval_expression_range(p->tokens, cond_start, lb, p->env);
+            bool ok = val_truthy(cond);
+            val_free(cond);
+            if (!ok) break;
+            execute_range(p->tokens, lb + 1, rb, p->env);
+            if (++guard > 1000000) error_at(p->tokens[lb], "loop stopped: too many iterations");
+        }
+        p->pos = rb + 1;
+        skip_newlines(p);
+        return;
+    }
+
+    error_at(peek(p), "unknown statement");
+}
+
+static void execute_range(Token *tokens, int start, int end, Env *env) {
+    Parser p = {tokens, start, end, env};
+    while (!at_end(&p)) parse_statement(&p);
 }
 
 static char *read_file(const char *path) {
-    FILE *file = fopen(path, "rb");
-    if (!file) {
-        fprintf(stderr, "Pomidor: cannot open file: %s\n", path);
-        return NULL;
-    }
-
-    fseek(file, 0, SEEK_END);
-    long length = ftell(file);
-    rewind(file);
-
-    if (length < 0) {
-        fclose(file);
-        fprintf(stderr, "Pomidor: cannot read file size\n");
-        return NULL;
-    }
-
-    char *buffer = (char *)malloc((size_t)length + 1);
-    if (!buffer) {
-        fclose(file);
-        fprintf(stderr, "Pomidor: out of memory\n");
-        return NULL;
-    }
-
-    size_t read = fread(buffer, 1, (size_t)length, file);
-    buffer[read] = '\0';
-    fclose(file);
-    return buffer;
-}
-
-static char *trim(char *text) {
-    while (isspace((unsigned char)*text)) {
-        text++;
-    }
-
-    if (*text == '\0') {
-        return text;
-    }
-
-    char *end = text + strlen(text) - 1;
-    while (end > text && isspace((unsigned char)*end)) {
-        *end = '\0';
-        end--;
-    }
-
-    return text;
-}
-
-static int starts_with_word(const char *line, const char *word) {
-    size_t len = strlen(word);
-    if (strncmp(line, word, len) != 0) {
-        return 0;
-    }
-    char next = line[len];
-    return next == '\0' || isspace((unsigned char)next);
-}
-
-static int is_number_text(const char *text) {
-    if (*text == '-' || *text == '+') {
-        text++;
-    }
-    int has_digit = 0;
-    while (*text) {
-        if (isdigit((unsigned char)*text)) {
-            has_digit = 1;
-        } else if (*text != '.') {
-            return 0;
-        }
-        text++;
-    }
-    return has_digit;
-}
-
-static Value eval_expression(Environment *env, const char *expression);
-
-static Value eval_simple(Environment *env, char *text) {
-    text = trim(text);
-
-    size_t len = strlen(text);
-    if (len >= 2 && text[0] == '"' && text[len - 1] == '"') {
-        text[len - 1] = '\0';
-        return value_string(text + 1);
-    }
-
-    if (is_number_text(text)) {
-        return value_number(strtod(text, NULL));
-    }
-
-    Variable *var = env_find(env, text);
-    if (!var) {
-        fprintf(stderr, "Pomidor: unknown variable: %s\n", text);
-        return value_number(0);
-    }
-
-    return value_clone(&var->value);
-}
-
-static Value value_add(Value left, Value right) {
-    if (left.type == VALUE_NUMBER && right.type == VALUE_NUMBER) {
-        double result = left.number + right.number;
-        value_free(&left);
-        value_free(&right);
-        return value_number(result);
-    }
-
-    char left_buffer[64];
-    char right_buffer[64];
-    const char *left_text = left.type == VALUE_STRING ? left.string : left_buffer;
-    const char *right_text = right.type == VALUE_STRING ? right.string : right_buffer;
-
-    if (left.type == VALUE_NUMBER) {
-        snprintf(left_buffer, sizeof(left_buffer), "%g", left.number);
-    }
-    if (right.type == VALUE_NUMBER) {
-        snprintf(right_buffer, sizeof(right_buffer), "%g", right.number);
-    }
-
-    size_t total = strlen(left_text) + strlen(right_text) + 1;
-    char *joined = (char *)malloc(total);
-    if (!joined) {
-        value_free(&left);
-        value_free(&right);
-        fprintf(stderr, "Pomidor: out of memory\n");
-        exit(1);
-    }
-
-    strcpy(joined, left_text);
-    strcat(joined, right_text);
-
-    value_free(&left);
-    value_free(&right);
-
-    Value result;
-    result.type = VALUE_STRING;
-    result.number = 0;
-    result.string = joined;
-    return result;
-}
-
-static char *find_plus_outside_string(char *text) {
-    int inside_string = 0;
-    for (char *p = text; *p; p++) {
-        if (*p == '"') {
-            inside_string = !inside_string;
-        } else if (*p == '+' && !inside_string) {
-            return p;
-        }
-    }
-    return NULL;
-}
-
-static Value eval_expression(Environment *env, const char *expression) {
-    char *copy = pom_strdup(expression);
-    char *plus = find_plus_outside_string(copy);
-
-    if (plus) {
-        *plus = '\0';
-        Value left = eval_expression(env, copy);
-        Value right = eval_expression(env, plus + 1);
-        free(copy);
-        return value_add(left, right);
-    }
-
-    Value result = eval_simple(env, copy);
-    free(copy);
-    return result;
-}
-
-static void print_value(Value value) {
-    if (value.type == VALUE_STRING) {
-        printf("%s\n", value.string);
-    } else {
-        printf("%g\n", value.number);
-    }
-    value_free(&value);
-}
-
-static void execute_line(Environment *env, char *line, int line_number) {
-    char *clean = trim(line);
-
-    if (*clean == '\0' || *clean == '#') {
-        return;
-    }
-
-    if (starts_with_word(clean, "print")) {
-        char *expr = trim(clean + strlen("print"));
-        print_value(eval_expression(env, expr));
-        return;
-    }
-
-    if (starts_with_word(clean, "выведи")) {
-        char *expr = trim(clean + strlen("выведи"));
-        print_value(eval_expression(env, expr));
-        return;
-    }
-
-    if (starts_with_word(clean, "let") || starts_with_word(clean, "пусть")) {
-        char *rest = starts_with_word(clean, "let")
-            ? trim(clean + strlen("let"))
-            : trim(clean + strlen("пусть"));
-
-        char *equals = strchr(rest, '=');
-        if (!equals) {
-            fprintf(stderr, "Pomidor line %d: expected '='\n", line_number);
-            return;
-        }
-
-        *equals = '\0';
-        char *name = trim(rest);
-        char *expr = trim(equals + 1);
-
-        if (*name == '\0') {
-            fprintf(stderr, "Pomidor line %d: expected variable name\n", line_number);
-            return;
-        }
-
-        env_set(env, name, eval_expression(env, expr));
-        return;
-    }
-
-    char *equals = strchr(clean, '=');
-    if (equals) {
-        *equals = '\0';
-        char *name = trim(clean);
-        char *expr = trim(equals + 1);
-        env_set(env, name, eval_expression(env, expr));
-        return;
-    }
-
-    fprintf(stderr, "Pomidor line %d: unknown command: %s\n", line_number, clean);
-}
-
-static int run_code(const char *code) {
-    Environment env;
-    env_init(&env);
-
-    char *copy = pom_strdup(code);
-    char *line = strtok(copy, "\n");
-    int line_number = 1;
-
-    while (line) {
-        execute_line(&env, line, line_number);
-        line = strtok(NULL, "\n");
-        line_number++;
-    }
-
-    free(copy);
-    env_free(&env);
-    return 0;
+    FILE *f = fopen(path, "rb");
+    if (!f) { fprintf(stderr, "Cannot open file: %s\n", path); exit(1); }
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    char *buf = (char *)pm_malloc((size_t)size + 1);
+    if (size > 0) fread(buf, 1, (size_t)size, f);
+    buf[size] = '\0';
+    fclose(f);
+    return buf;
 }
 
 int main(int argc, char **argv) {
-    if (argc < 2) {
-        printf("Pomidor Language\n");
-        printf("Usage: pomidor file.pom\n");
+    bool show_mem = false;
+    const char *file = NULL;
+    for (int i = 1; i < argc; i++) {
+        if (streq(argv[i], "--mem")) show_mem = true;
+        else file = argv[i];
+    }
+    if (!file) {
+        printf("Pomidor C\nUsage: pomidor [--mem] file.pom\n");
         return 0;
     }
-
-    char *code = read_file(argv[1]);
-    if (!code) {
-        return 1;
+    char *source = read_file(file);
+    TokenList tokens = lex_source(source);
+    Env env = {0};
+    execute_range(tokens.items, 0, tokens.count, &env);
+    env_free(&env);
+    tokens_free(&tokens);
+    pm_free(source);
+    if (show_mem) {
+        printf("\n[memory] allocations: %zu, frees: %zu, alive: %zu\n", g_allocs, g_frees, g_allocs - g_frees);
     }
-
-    int result = run_code(code);
-    free(code);
-    return result;
+    return 0;
 }

@@ -1,0 +1,20 @@
+# Pomidor: English example
+
+let name = "Render"
+let x = 1
+let sum = 0
+
+print "Hello, " + name
+print "Name length: " + str(len(name))
+
+while x <= 5 {
+    sum = sum + x
+    print "x = " + str(x)
+    x = x + 1
+}
+
+if sum == 15 and true {
+    print "Correct sum: " + str(sum)
+} else {
+    print "Error"
+}
