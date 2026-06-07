@@ -1,32 +1,141 @@
-# Pomidor C
+# Pomidor
 
-**Pomidor** — экспериментальный язык программирования на C с поддержкой русского и английского синтаксиса.
+**Pomidor** — экспериментальный язык программирования на **C** с русским и английским синтаксисом.
 
-Цель проекта — сделать простой, быстрый и лёгкий язык, который можно постепенно развивать до полноценного ЯП.
+Цель проекта — сделать простой, быстрый и лёгкий язык, который можно запускать из командной строки.
 
-## Что нового в этой версии
+Расширение файлов:
 
-Добавлено больше функционала:
+```text
+.pom
+```
 
-- переменные: `пусть` / `let`
-- изменение переменных: `x = x + 1`
-- вывод: `выведи` / `print`
-- условия: `если` / `if`
-- ветка иначе: `иначе` / `else`
-- циклы: `пока` / `while`
+## Быстрая установка
+
+### Windows
+
+Открой PowerShell и выполни:
+
+```powershell
+irm https://github.com/MihailKashintsev/pomidor-c/releases/latest/download/install.ps1 | iex
+```
+
+После установки перезапусти терминал и проверь:
+
+```bash
+pomidor --version
+```
+
+### Linux/macOS
+
+```bash
+curl -fsSL https://github.com/MihailKashintsev/pomidor-c/releases/latest/download/install.sh | sh
+```
+
+Добавь Pomidor в `PATH`, если скрипт попросит:
+
+```bash
+export PATH="$HOME/.pomidor/bin:$PATH"
+```
+
+Проверка:
+
+```bash
+pomidor --version
+```
+
+## Обновления
+
+Проверить наличие новой версии:
+
+```bash
+pomidor update-check
+```
+
+Обновить Pomidor:
+
+```bash
+pomidor update
+```
+
+Команды используют GitHub Releases репозитория:
+
+```text
+https://github.com/MihailKashintsev/pomidor-c/releases
+```
+
+Важно: чтобы установка и обновление работали, в последнем Release должны быть файлы:
+
+```text
+install.ps1
+install.sh
+pomidor-windows-x64.zip
+pomidor-linux-x64.tar.gz
+pomidor-macos-x64.tar.gz
+```
+
+Для macOS/ARM или Linux/ARM можно добавлять отдельные архивы:
+
+```text
+pomidor-macos-arm64.tar.gz
+pomidor-linux-arm64.tar.gz
+```
+
+## Запуск программы
+
+```bash
+pomidor examples/advanced_ru.pom
+```
+
+или:
+
+```bash
+pomidor examples/advanced_en.pom
+```
+
+## Команды CLI
+
+```bash
+pomidor file.pom
+pomidor --mem file.pom
+pomidor --version
+pomidor update-check
+pomidor update
+```
+
+Описание:
+
+| Команда | Что делает |
+|---|---|
+| `pomidor file.pom` | запускает файл Pomidor |
+| `pomidor --mem file.pom` | запускает файл и показывает счётчик памяти |
+| `pomidor --version` | показывает текущую версию |
+| `pomidor update-check` | проверяет последнюю версию в GitHub Releases |
+| `pomidor update` | запускает обновление через GitHub Releases |
+
+## Возможности языка сейчас
+
+Pomidor поддерживает:
+
+- `пусть` / `let` — создание переменных
+- `выведи` / `print` — вывод в консоль
+- `если` / `if`
+- `иначе` / `else`
+- `пока` / `while`
+- `истина` / `true`
+- `ложь` / `false`
+- `и` / `and`
+- `или` / `or`
+- `не` / `not`
 - числа
 - строки
-- булевые значения: `истина` / `true`, `ложь` / `false`
-- арифметика: `+`, `-`, `*`, `/`, `%`
+- переменные
+- присваивание
+- арифметику: `+`, `-`, `*`, `/`, `%`
 - сравнения: `>`, `>=`, `<`, `<=`, `==`, `!=`
-- логика: `и` / `and`, `или` / `or`, `не` / `not`
 - скобки в выражениях
 - комментарии через `#`
-- встроенные функции:
-  - `длина()` / `len()`
-  - `строка()` / `str()`
-  - `число()` / `num()`
-- проверка памяти через `--mem`
+- встроенные функции: `длина` / `len`, `строка` / `str`, `число` / `num`
 
 ## Пример на русском
 
@@ -51,7 +160,7 @@
 }
 ```
 
-## Пример на английском
+## Example in English
 
 ```pomidor
 let name = "Render"
@@ -74,35 +183,15 @@ if sum == 15 and true {
 }
 ```
 
-## Структура проекта
+## Сборка из исходников
 
-```text
-pomidor-c-advanced/
-│
-├── src/
-│   └── main.c
-│
-├── examples/
-│   ├── simple_ru.pom
-│   ├── simple_en.pom
-│   ├── advanced_ru.pom
-│   └── advanced_en.pom
-│
-├── CMakeLists.txt
-├── README.md
-├── LICENSE
-└── .gitignore
-```
-
-## Сборка на Windows
+### Windows
 
 Нужно установить:
 
 - Git
 - CMake
 - Visual Studio Build Tools или Visual Studio Community с компонентом C++
-
-Команды:
 
 ```bash
 cmake -S . -B build
@@ -115,13 +204,7 @@ cmake --build build --config Release
 build\Release\pomidor.exe examples\advanced_ru.pom
 ```
 
-Проверка памяти:
-
-```bash
-build\Release\pomidor.exe --mem examples\advanced_ru.pom
-```
-
-## Сборка на Linux/macOS
+### Linux/macOS
 
 ```bash
 cmake -S . -B build
@@ -129,27 +212,13 @@ cmake --build build
 ./build/pomidor examples/advanced_ru.pom
 ```
 
-Проверка памяти:
-
-```bash
-./build/pomidor --mem examples/advanced_ru.pom
-```
-
-В конце должно быть примерно так:
-
-```text
-[memory] allocations: 92, frees: 92, alive: 0
-```
-
-`alive: 0` означает, что в этом запуске не осталось неудалённой памяти.
-
-## Установка
+## Локальная установка из исходников
 
 ```bash
 cmake --install build --prefix install
 ```
 
-После этого исполняемый файл будет здесь:
+Исполняемый файл будет здесь:
 
 ```text
 install/bin/pomidor
@@ -161,44 +230,120 @@ install/bin/pomidor
 install/bin/pomidor.exe
 ```
 
-## Как заменить старую версию в репозитории
+## Сборка релиза для GitHub
 
-1. Скачай архив.
-2. Распакуй его.
-3. Скопируй файлы в свой репозиторий `pomidor-c`.
-4. Выполни:
+### Windows
+
+```powershell
+.\scripts\build-release.ps1
+```
+
+После этого в папке `dist` появятся:
+
+```text
+pomidor-windows-x64.zip
+install.ps1
+```
+
+Их нужно загрузить в GitHub Release.
+
+### Linux/macOS
 
 ```bash
-git add .
-git commit -m "Add conditions loops and expressions"
-git push
+./scripts/build-release.sh
 ```
 
-## Что добавить следующим этапом
+После этого в папке `dist` появятся:
 
-Следующие крупные функции:
-
-- функции пользователя:
-
-```pomidor
-функция привет(имя) {
-    выведи "Привет, " + имя
-}
+```text
+pomidor-linux-x64.tar.gz
+install.sh
 ```
 
-- массивы:
+или:
 
-```pomidor
-пусть числа = [1, 2, 3]
+```text
+pomidor-macos-x64.tar.gz
+install.sh
 ```
 
-- импорт файлов:
+Эти файлы нужно загрузить в GitHub Release.
 
-```pomidor
-импорт "math.pom"
+## Проверка памяти
+
+Так как Pomidor пишется на C, важно следить за памятью.
+
+Главное правило:
+
+```text
+malloc / calloc / realloc / strdup → обязательно free
 ```
 
-- нормальный AST
-- разделение `main.c` на `lexer.c`, `parser.c`, `interpreter.c`
-- установщик для Windows
-- расширение VS Code с подсветкой `.pom`
+Запуск со счётчиком памяти:
+
+```bash
+pomidor --mem examples/advanced_ru.pom
+```
+
+Пример хорошего результата:
+
+```text
+[memory] allocations: 92, frees: 92, alive: 0
+```
+
+### AddressSanitizer для GCC/Clang
+
+```bash
+cmake -S . -B build-asan -DCMAKE_C_FLAGS="-fsanitize=address -g"
+cmake --build build-asan
+./build-asan/pomidor examples/advanced_ru.pom
+```
+
+### Valgrind на Linux
+
+```bash
+valgrind --leak-check=full ./build/pomidor examples/advanced_ru.pom
+```
+
+## Структура проекта
+
+```text
+pomidor-c/
+│
+├── src/
+│   └── main.c
+│
+├── examples/
+│   ├── advanced_ru.pom
+│   ├── advanced_en.pom
+│   ├── simple_ru.pom
+│   └── simple_en.pom
+│
+├── scripts/
+│   ├── install.ps1
+│   ├── install.sh
+│   ├── build-release.ps1
+│   └── build-release.sh
+│
+├── CMakeLists.txt
+├── README.md
+├── LICENSE
+└── .gitignore
+```
+
+## План развития
+
+Дальше можно добавить:
+
+- нормальное разделение на `lexer.c`, `parser.c`, `interpreter.c`
+- массивы
+- функции пользователя
+- импорт модулей
+- обработку ошибок без аварийного завершения
+- подсветку синтаксиса для VS Code
+- установщик `.exe` для Windows
+- автосборку релизов через GitHub Actions
+
+## Лицензия
+
+MIT.

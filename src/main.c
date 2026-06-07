@@ -3,9 +3,144 @@
 #include <string.h>
 #include <ctype.h>
 #include <stdbool.h>
+#include <errno.h>
+
+#define POMIDOR_VERSION "0.3.0"
+#define POMIDOR_REPO "MihailKashintsev/pomidor-c"
 
 static size_t g_allocs = 0;
 static size_t g_frees = 0;
+
+static int version_part(const char **p) {
+    while (**p == 'v' || **p == 'V' || **p == ' ' || **p == '.') (*p)++;
+    int n = 0;
+    while (isdigit((unsigned char)**p)) { n = n * 10 + (**p - '0'); (*p)++; }
+    return n;
+}
+
+static int compare_versions(const char *a, const char *b) {
+    for (int i = 0; i < 3; i++) {
+        int pa = version_part(&a);
+        int pb = version_part(&b);
+        if (pa < pb) return -1;
+        if (pa > pb) return 1;
+    }
+    return 0;
+}
+
+static char *read_whole_file_plain(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return NULL; }
+    long size = ftell(f);
+    if (size < 0) { fclose(f); return NULL; }
+    rewind(f);
+    char *buf = (char *)malloc((size_t)size + 1);
+    if (!buf) { fclose(f); return NULL; }
+    size_t got = fread(buf, 1, (size_t)size, f);
+    buf[got] = '\0';
+    fclose(f);
+    return buf;
+}
+
+static int run_command_plain(const char *cmd) {
+    return system(cmd);
+}
+
+static const char *temp_json_path(void) {
+#ifdef _WIN32
+    return "%TEMP%\\pomidor_latest.json";
+#else
+    return "/tmp/pomidor_latest.json";
+#endif
+}
+
+static const char *temp_json_read_path(void) {
+#ifdef _WIN32
+    const char *tmp = getenv("TEMP");
+    static char path[512];
+    snprintf(path, sizeof(path), "%s\\pomidor_latest.json", tmp ? tmp : ".");
+    return path;
+#else
+    return "/tmp/pomidor_latest.json";
+#endif
+}
+
+static bool fetch_latest_json(void) {
+    char cmd[1024];
+#ifdef _WIN32
+    snprintf(cmd, sizeof(cmd), "curl -L -s https://api.github.com/repos/%s/releases/latest -o \"%s\"", POMIDOR_REPO, temp_json_path());
+#else
+    snprintf(cmd, sizeof(cmd), "curl -L -s https://api.github.com/repos/%s/releases/latest -o '%s'", POMIDOR_REPO, temp_json_path());
+#endif
+    return run_command_plain(cmd) == 0;
+}
+
+static bool extract_json_string(const char *json, const char *key, char *out, size_t out_size) {
+    char pattern[128];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+    const char *p = strstr(json, pattern);
+    if (!p) return false;
+    p = strchr(p, ':');
+    if (!p) return false;
+    p++;
+    while (*p && isspace((unsigned char)*p)) p++;
+    if (*p != '"') return false;
+    p++;
+    size_t i = 0;
+    while (*p && *p != '"' && i + 1 < out_size) out[i++] = *p++;
+    out[i] = '\0';
+    return i > 0;
+}
+
+static bool get_latest_version(char *out, size_t out_size) {
+    if (!fetch_latest_json()) return false;
+    char *json = read_whole_file_plain(temp_json_read_path());
+    if (!json) return false;
+    bool ok = extract_json_string(json, "tag_name", out, out_size);
+    free(json);
+    return ok;
+}
+
+static int command_update_check(void) {
+    char latest[128];
+    printf("Pomidor: проверка обновлений...\n");
+    if (!get_latest_version(latest, sizeof(latest))) {
+        fprintf(stderr, "Не удалось получить последнюю версию. Проверь интернет и наличие релизов на GitHub.\n");
+        return 1;
+    }
+    printf("Текущая версия: %s\n", POMIDOR_VERSION);
+    printf("Последняя версия: %s\n", latest);
+    int cmp = compare_versions(POMIDOR_VERSION, latest);
+    if (cmp < 0) printf("Доступно обновление. Запусти: pomidor update\n");
+    else printf("Установлена актуальная версия.\n");
+    return 0;
+}
+
+static int command_update(void) {
+    printf("Pomidor: запуск обновления через GitHub Releases...\n");
+#ifdef _WIN32
+    const char *cmd = "powershell -NoProfile -ExecutionPolicy Bypass -Command \"$u='https://github.com/MihailKashintsev/pomidor-c/releases/latest/download/install.ps1'; $p=Join-Path $env:TEMP 'pomidor-install.ps1'; Invoke-WebRequest -UseBasicParsing $u -OutFile $p; & $p\"";
+#else
+    const char *cmd = "curl -fsSL https://github.com/MihailKashintsev/pomidor-c/releases/latest/download/install.sh | sh";
+#endif
+    int code = run_command_plain(cmd);
+    if (code != 0) {
+        fprintf(stderr, "Обновление не выполнено. Убедись, что в последнем GitHub Release есть install.ps1/install.sh и архив с бинарником.\n");
+        return 1;
+    }
+    return 0;
+}
+
+static void print_help(void) {
+    printf("Pomidor %s\n", POMIDOR_VERSION);
+    printf("Usage:\n");
+    printf("  pomidor file.pom          Запустить файл Pomidor\n");
+    printf("  pomidor --mem file.pom    Запустить файл и показать проверку памяти\n");
+    printf("  pomidor --version         Показать версию\n");
+    printf("  pomidor update-check      Проверить обновления\n");
+    printf("  pomidor update            Обновить Pomidor через GitHub Releases\n");
+}
 
 static void *pm_malloc(size_t size) {
     void *ptr = malloc(size ? size : 1);
@@ -565,12 +700,22 @@ static char *read_file(const char *path) {
 int main(int argc, char **argv) {
     bool show_mem = false;
     const char *file = NULL;
+
+    if (argc <= 1) {
+        print_help();
+        return 0;
+    }
+
     for (int i = 1; i < argc; i++) {
         if (streq(argv[i], "--mem")) show_mem = true;
+        else if (streq(argv[i], "--help") || streq(argv[i], "-h")) { print_help(); return 0; }
+        else if (streq(argv[i], "--version") || streq(argv[i], "version")) { printf("Pomidor %s\n", POMIDOR_VERSION); return 0; }
+        else if (streq(argv[i], "update-check")) return command_update_check();
+        else if (streq(argv[i], "update")) return command_update();
         else file = argv[i];
     }
     if (!file) {
-        printf("Pomidor C\nUsage: pomidor [--mem] file.pom\n");
+        print_help();
         return 0;
     }
     char *source = read_file(file);

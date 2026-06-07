@@ -1,11 +1,15 @@
 build/
 build-*/
+build-release/
+dist/
 install/
 *.exe
 *.obj
 *.o
-*.ilk
 *.pdb
+*.ilk
+*.zip
+*.tar.gz
+.DS_Store
 .vscode/
 .idea/
-.DS_Store
