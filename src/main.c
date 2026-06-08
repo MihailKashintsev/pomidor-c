@@ -6,7 +6,7 @@
 #include <errno.h>
 
 #ifndef POMIDOR_VERSION
-#define POMIDOR_VERSION "0.4.0"
+#define POMIDOR_VERSION "0.4.1"
 #endif
 #define POMIDOR_REPO "MihailKashintsev/pomidor-c"
 

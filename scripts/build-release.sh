@@ -1,36 +1,47 @@
 #!/usr/bin/env sh
-set -e
+set -eu
 
-VERSION="0.3.0"
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BUILD="$ROOT/build-release"
-DIST="$ROOT/dist"
+echo "Building Pomidor release asset..."
 
-rm -rf "$BUILD" "$DIST"
-mkdir -p "$DIST"
+if [ ! -f "CMakeLists.txt" ]; then
+  echo "CMakeLists.txt not found. Run this script from the repository root." >&2
+  exit 1
+fi
 
-cmake -S "$ROOT" -B "$BUILD" -DCMAKE_BUILD_TYPE=Release
-cmake --build "$BUILD"
+rm -rf dist package
+mkdir -p dist package
 
-OS="linux"
-case "$(uname -s)" in
-  Darwin*) OS="macos" ;;
-  Linux*) OS="linux" ;;
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release
+
+OS="$(uname -s)"
+ARCH="$(uname -m)"
+
+case "$OS" in
+  Linux)
+    ASSET="pomidor-linux-x64.tar.gz"
+    ;;
+  Darwin)
+    if [ "$ARCH" = "arm64" ]; then
+      ASSET="pomidor-macos-arm64.tar.gz"
+    else
+      ASSET="pomidor-macos-x64.tar.gz"
+    fi
+    ;;
+  *)
+    echo "Unsupported OS: $OS" >&2
+    exit 1
+    ;;
 esac
 
-ARCH="x64"
-case "$(uname -m)" in
-  arm64|aarch64) ARCH="arm64" ;;
-esac
+cp build/pomidor package/pomidor
+chmod +x package/pomidor
+tar -czf "dist/$ASSET" -C package pomidor
 
-PKG="$DIST/pomidor-$OS-$ARCH"
-mkdir -p "$PKG/bin" "$PKG/examples"
-cp "$BUILD/pomidor" "$PKG/bin/pomidor"
-cp "$ROOT/examples"/*.pom "$PKG/examples/"
-cp "$ROOT/README.md" "$PKG/"
-cp "$ROOT/LICENSE" "$PKG/"
+if [ -f "scripts/install.sh" ]; then
+  cp scripts/install.sh dist/install.sh
+  chmod +x dist/install.sh
+fi
 
-(cd "$DIST" && tar -czf "pomidor-$OS-$ARCH.tar.gz" "pomidor-$OS-$ARCH")
-cp "$ROOT/scripts/install.sh" "$DIST/install.sh"
-
-echo "Готово: $DIST"
+echo "Done:"
+echo "dist/$ASSET"

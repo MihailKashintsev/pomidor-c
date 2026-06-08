@@ -1,49 +1,60 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 set -e
 
 VERSION="$1"
+
 if [ -z "$VERSION" ]; then
-  echo "Использование: ./scripts/release.sh 0.4.0" >&2
+  echo "Usage: ./scripts/release.sh 0.4.1"
   exit 1
 fi
 
-case "$VERSION" in
-  v*) TAG="$VERSION"; CLEAN_VERSION="${VERSION#v}" ;;
-  *) TAG="v$VERSION"; CLEAN_VERSION="$VERSION" ;;
-esac
+VERSION="${VERSION#v}"
 
-case "$CLEAN_VERSION" in
-  [0-9]*.[0-9]*.[0-9]*) ;;
-  *) echo "Версия должна быть в формате 0.4.0 или v0.4.0" >&2; exit 1 ;;
-esac
+if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+  echo "Version must be like 0.4.1 or v0.4.1"
+  exit 1
+fi
 
-echo "Pomidor: подготовка релиза $TAG"
+TAG="v$VERSION"
 
-if command -v python3 >/dev/null 2>&1; then
-python3 - <<PY
-from pathlib import Path
-import re
-p = Path('src/main.c')
-s = p.read_text(encoding='utf-8')
-s = re.sub(r'#define POMIDOR_VERSION "[^"]+"', '#define POMIDOR_VERSION "$CLEAN_VERSION"', s)
-p.write_text(s, encoding='utf-8')
-PY
+if [ ! -f "src/main.c" ]; then
+  echo "src/main.c not found. Run from repository root."
+  exit 1
+fi
+
+echo "Preparing Pomidor release $TAG"
+
+# Update version in src/main.c if macro already exists.
+if grep -qE '#define[[:space:]]+POMIDOR_VERSION[[:space:]]+"[^"]+"' src/main.c; then
+  sed -i -E "s/#define[[:space:]]+POMIDOR_VERSION[[:space:]]+\"[^\"]+\"/#define POMIDOR_VERSION \"$VERSION\"/" src/main.c
+else
+  tmp_file="$(mktemp)"
+  printf '#define POMIDOR_VERSION "%s"\n' "$VERSION" > "$tmp_file"
+  cat src/main.c >> "$tmp_file"
+  mv "$tmp_file" src/main.c
 fi
 
 git add .
-if [ -n "$(git status --porcelain)" ]; then
-  git commit -m "Release $TAG"
-else
-  echo "Нет изменений для коммита. Создаю только тег."
-fi
+git commit -m "Release $TAG" || echo "Nothing to commit."
 
 if git rev-parse "$TAG" >/dev/null 2>&1; then
-  echo "Тег $TAG уже существует. Выбери новую версию." >&2
+  echo "Tag $TAG already exists locally."
+  echo "Use another version or delete the tag:"
+  echo "  git tag -d $TAG"
+  echo "  git push origin :refs/tags/$TAG"
   exit 1
 fi
 
-git tag -a "$TAG" -m "Pomidor $TAG"
+git tag "$TAG"
 git push origin main
 git push origin "$TAG"
 
-echo "Готово. GitHub Actions сам соберёт релиз: https://github.com/MihailKashintsev/pomidor-c/actions"
+echo ""
+echo "Done."
+echo "GitHub Actions will now build and publish:"
+echo "  pomidor-windows-x64.zip"
+echo ""
+echo "Open:"
+echo "  https://github.com/MihailKashintsev/pomidor-c/actions"
+echo "Release will appear here:"
+echo "  https://github.com/MihailKashintsev/pomidor-c/releases/tag/$TAG"

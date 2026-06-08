@@ -1,153 +1,78 @@
-name: Build Pomidor Release
+name: Pomidor Release
 
 on:
   push:
     tags:
-      - "v*.*.*"
-  workflow_dispatch:
-    inputs:
-      version:
-        description: "Версия релиза, например 0.4.0"
-        required: true
-        default: "0.4.0"
+      - "v*"
 
 permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build ${{ matrix.asset }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            platform: windows
-            arch: x64
-            asset: pomidor-windows-x64.zip
-          - os: ubuntu-latest
-            platform: linux
-            arch: x64
-            asset: pomidor-linux-x64.tar.gz
-          - os: macos-13
-            platform: macos
-            arch: x64
-            asset: pomidor-macos-x64.tar.gz
-          - os: macos-14
-            platform: macos
-            arch: arm64
-            asset: pomidor-macos-arm64.tar.gz
+  windows-release:
+    name: Build Windows release for Pomidor IDE
+    runs-on: windows-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Get version
+      - name: Install MSYS2 UCRT64
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            zip
+
+      - name: Extract version from tag
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ github.event.inputs.version }}"
-            TAG="v$VERSION"
-          else
-            TAG="${GITHUB_REF_NAME}"
-            VERSION="${TAG#v}"
-          fi
+          VERSION="${GITHUB_REF_NAME#v}"
           echo "POMIDOR_VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
+          echo "Release version: $VERSION"
 
-      - name: Configure CMake
-        run: cmake -S . -B build -DPOMIDOR_VERSION=${{ env.POMIDOR_VERSION }} -DCMAKE_BUILD_TYPE=Release
-
-      - name: Build
-        run: cmake --build build --config Release
-
-      - name: Package Windows
-        if: matrix.platform == 'windows'
-        shell: pwsh
+      - name: Build pomidor.exe
+        shell: msys2 {0}
         run: |
-          New-Item -ItemType Directory -Force -Path package/bin | Out-Null
-          New-Item -ItemType Directory -Force -Path package/examples | Out-Null
-          Copy-Item build/Release/pomidor.exe package/bin/pomidor.exe
-          Copy-Item examples/*.pom package/examples/
-          Copy-Item README.md package/
-          Copy-Item LICENSE package/
-          Compress-Archive -Path package/* -DestinationPath ${{ matrix.asset }} -Force
-          Copy-Item scripts/install.ps1 install.ps1
+          mkdir -p dist
 
-      - name: Package Unix
-        if: matrix.platform != 'windows'
-        shell: bash
+          echo "Compiling Pomidor $POMIDOR_VERSION"
+
+          gcc -std=c11 -O2 -Wall -Wextra \
+            -I src \
+            -finput-charset=UTF-8 \
+            -fexec-charset=UTF-8 \
+            -DPOMIDOR_VERSION=\"$POMIDOR_VERSION\" \
+            src/*.c \
+            -o dist/pomidor.exe
+
+          ./dist/pomidor.exe --version || true
+
+      - name: Create ZIP for Pomidor IDE
+        shell: msys2 {0}
         run: |
-          mkdir -p package/bin package/examples
-          cp build/pomidor package/bin/pomidor
-          cp examples/*.pom package/examples/
-          cp README.md package/
-          cp LICENSE package/
-          chmod +x package/bin/pomidor
-          tar -czf "${{ matrix.asset }}" -C package .
-          cp scripts/install.sh install.sh
+          cd dist
+          rm -f pomidor-windows-x64.zip
+          zip pomidor-windows-x64.zip pomidor.exe
 
-      - name: Upload package artifact
+          echo "ZIP content:"
+          unzip -l pomidor-windows-x64.zip
+
+          unzip -l pomidor-windows-x64.zip | grep "pomidor.exe"
+
+      - name: Upload artifact for debug
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.asset }}
-          path: ${{ matrix.asset }}
+          name: pomidor-windows-x64
+          path: dist/pomidor-windows-x64.zip
 
-      - name: Upload install.ps1 artifact
-        if: matrix.platform == 'windows'
-        uses: actions/upload-artifact@v4
-        with:
-          name: install-ps1
-          path: install.ps1
-
-      - name: Upload install.sh artifact
-        if: matrix.platform == 'linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: install-sh
-          path: install.sh
-
-  release:
-    name: Create GitHub Release
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Get version
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ github.event.inputs.version }}"
-            TAG="v$VERSION"
-          else
-            TAG="${GITHUB_REF_NAME}"
-            VERSION="${TAG#v}"
-          fi
-          echo "POMIDOR_VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
-
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: true
-
-      - name: Create release
+      - name: Create GitHub Release and attach ZIP
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          name: Pomidor ${{ env.POMIDOR_VERSION }}
-          body: |
-            Автоматический релиз Pomidor ${{ env.POMIDOR_VERSION }}.
-
-            Установка Windows:
-            ```powershell
-            irm https://github.com/MihailKashintsev/pomidor-c/releases/latest/download/install.ps1 | iex
-            ```
-
-            Установка Linux/macOS:
-            ```bash
-            curl -fsSL https://github.com/MihailKashintsev/pomidor-c/releases/latest/download/install.sh | sh
-            ```
-          files: dist/*
-          make_latest: true
+          name: Pomidor ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          files: |
+            dist/pomidor-windows-x64.zip
+          generate_release_notes: true

@@ -24,14 +24,6 @@ if (-not (Test-Path "src/main.c")) {
     exit 1
 }
 
-git status --short | Out-String | ForEach-Object {
-    if ($_.Trim().Length -gt 0) {
-        Write-Host "Repository has local changes:"
-        Write-Host $_
-        Write-Host "They will be included in the release commit."
-    }
-}
-
 $MainPath = "src/main.c"
 $MainText = Get-Content $MainPath -Raw -Encoding UTF8
 
@@ -42,6 +34,9 @@ if ($MainText -match '#define\s+POMIDOR_VERSION\s+"[^"]+"') {
 }
 
 Set-Content -Path $MainPath -Value $MainText -Encoding UTF8
+
+Write-Host "Checking Windows archive for Pomidor IDE..."
+.\scripts\build-release.ps1 $CleanVersion
 
 git add .
 git commit -m "Release $Tag"
@@ -58,5 +53,5 @@ git push origin $Tag
 
 Write-Host ""
 Write-Host "Done."
-Write-Host "GitHub Actions should now build and publish release $Tag."
+Write-Host "GitHub Actions will attach pomidor-windows-x64.zip to the release."
 Write-Host "Open: https://github.com/MihailKashintsev/pomidor-c/actions"
